@@ -62,7 +62,6 @@ EDGE/
 
 ## Contributing
 - **Fork the repo** and submit **pull requests**.
-- **Report bugs or suggest features** via GitHub issues.
 - **Share your own scenes/games** using EDGE.
 
 ---
