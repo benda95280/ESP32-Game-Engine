@@ -117,6 +117,26 @@ void InputManager::processButtonEvent(EDGE_Button button, EDGE_Event eventType) 
 
     bool useKeyQueue = currentScene->usesKeyQueue();
 
+    bool hasListeners = false;
+    for (const auto& listener : listeners) {
+        if (listener.scene == currentScene) {
+            hasListeners = true;
+            break;
+        }
+    }
+
+    if (!hasListeners && !useKeyQueue) {
+        static uint32_t lastWarnTime = 0;
+        uint32_t now = millis();
+        if (_logger && (now - lastWarnTime > 1000)) {
+            char buf[150];
+            snprintf(buf, sizeof(buf), "[HARDWARE_INPUT] No listeners for scene '%s', ignoring button events", currentSceneName.c_str());
+            _logger(buf);
+            lastWarnTime = now;
+        }
+        return;
+    }
+
     if (useKeyQueue && keyQueue != NULL) {
         uint8_t gemKeyCode = GEM_KEY_NONE;
         if (button == EDGE_Button::UP && eventType == EDGE_Event::CLICK) { gemKeyCode = GEM_KEY_UP; } 
