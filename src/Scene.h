@@ -1,5 +1,5 @@
 #pragma once
-#include <ArduinoQueue.h>
+#include <vector>
 #include <functional>
 
 // Define the logger type here, as it's a fundamental type the scene can use.
@@ -33,7 +33,7 @@ public:
     static void setMasterLogger(EDGELogger logger) { _masterLogger = logger; }
 
 protected:
-    ArduinoQueue<Entity*> entities;
+    std::vector<Entity*> entities;
     
     bool managesOwnDrawing = false;
     

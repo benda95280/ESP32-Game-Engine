@@ -13,8 +13,7 @@
     ],
     "license": "MIT",
     "dependencies": {
-      "U8g2": "*",
-      "ArduinoQueue": "*"
+      "U8g2": "*"
     },
     "frameworks": ["arduino"],
     "platforms": ["espressif32"],
