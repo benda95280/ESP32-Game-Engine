@@ -46,12 +46,18 @@ void EDGE::update() {
 }
 
 void EDGE::draw() {
-    Scene* currentScene = sceneManager.getCurrentScene();
     U8G2* u8g2_ptr = renderer.getU8G2();
     if (!u8g2_ptr) {
         return;
     }
 
+    if (sceneManager.isTransitioning()) {
+        sceneManager.draw(renderer);
+        u8g2_ptr->sendBuffer();
+        return;
+    }
+
+    Scene* currentScene = sceneManager.getCurrentScene();
     if (currentScene && currentScene->doesManageOwnDrawing()) {
         sceneManager.draw(renderer); 
     } else {

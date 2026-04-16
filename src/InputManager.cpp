@@ -107,6 +107,11 @@ void InputManager::processButtonEvent(EDGE_Button button, EDGE_Event eventType) 
         return;
     }
 
+    if (sceneManager->shouldBlockInput()) {
+        if (_logger) _logger("[HARDWARE_INPUT] InputManager: Input blocked during scene transition.");
+        return;
+    }
+
     Scene* currentScene = sceneManager->getCurrentScene();
     String currentSceneName = sceneManager->getCurrentSceneName();
     if (!currentScene) {

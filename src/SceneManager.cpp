@@ -1,5 +1,6 @@
 #include "SceneManager.h" 
 #include "Scene.h"
+#include "SceneTransition.h"
 #include "InputManager.h"
 #include "Renderer.h"
 #include <Arduino.h>         
@@ -10,6 +11,7 @@ SceneManager::SceneManager() : _logger(nullptr) {
 }
 
 SceneManager::~SceneManager() {
+    forceCleanupTransition();
     clearStack(); 
 }
 
@@ -38,12 +40,13 @@ void SceneManager::processSceneChanges() {
     String nameToSet = _pendingNextSceneName;
     bool replace = _pendingReplaceStack;
     void* configPtr = _pendingConfigData;
+    SceneTransition* transition = _pendingTransition;
 
     if (nameToSet != "UNKNOWN" && nameToSet != "") {
         if (replace) {
-            setCurrentScene(nameToSet, configPtr);
+            setCurrentScene(nameToSet, configPtr, transition);
         } else {
-            pushScene(nameToSet, configPtr);
+            pushScene(nameToSet, configPtr, transition);
         }
     } else {
         if (_logger) _logger("[SCENEMANAGER] Scene change NOT processed. Target name was invalid.");
@@ -79,20 +82,22 @@ bool SceneManager::registerScene(const String& name, SceneFactoryFunction factor
     return true;
 }
 
-void SceneManager::requestSetCurrentScene(const String& sceneName, void* configData) {
+void SceneManager::requestSetCurrentScene(const String& sceneName, void* configData, SceneTransition* transition) {
     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Requesting to SET current scene to '%s'", sceneName.c_str()); _logger(buf); }
     
     _pendingNextSceneName = sceneName;
     _pendingConfigData = configData;
+    _pendingTransition = transition;
     _pendingReplaceStack = true;
     _pendingSceneChange = true;
 }
 
-void SceneManager::requestPushScene(const String& sceneName, void* configData) {
+void SceneManager::requestPushScene(const String& sceneName, void* configData, SceneTransition* transition) {
     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Requesting to PUSH scene '%s'", sceneName.c_str()); _logger(buf); }
 
     _pendingNextSceneName = sceneName;
     _pendingConfigData = configData;
+    _pendingTransition = transition;
     _pendingReplaceStack = false;
     _pendingSceneChange = true;
 }
@@ -103,6 +108,7 @@ void SceneManager::clearPendingSceneChange() {
     if (_pendingConfigData) {
         _pendingConfigData = nullptr;
     }
+    _pendingTransition = nullptr;
 }
 
 void SceneManager::clearStack() {
@@ -146,17 +152,24 @@ Scene* SceneManager::createSceneByName(const String& sceneName, void* configData
 }
 
 
-bool SceneManager::setCurrentScene(const String& sceneName, void* configData) { 
+bool SceneManager::setCurrentScene(const String& sceneName, void* configData, SceneTransition* transition) { 
     if (!inputManager) { 
         if (_logger) _logger("[SCENEMANAGER] InputManager is null in setCurrentScene.");
         return false; 
     }
     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Setting current scene to '%s'", sceneName.c_str()); _logger(buf); }
 
+    forceCleanupTransition();
+
     if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
         _previousSceneName = _sceneNameStack[sceneCount - 1];
+        _outgoingScene = sceneStack[sceneCount - 1];
+        sceneStack[sceneCount - 1] = nullptr;
+        _sceneNameStack[sceneCount - 1] = "";
+        sceneCount--;
     } else {
         _previousSceneName = "";
+        _outgoingScene = nullptr;
     }
 
     clearStack(); 
@@ -164,6 +177,7 @@ bool SceneManager::setCurrentScene(const String& sceneName, void* configData) {
     Scene* newScene = createSceneByName(sceneName, configData); 
     if (!newScene) { 
         if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Failed to create scene '%s' for setCurrentScene.", sceneName.c_str()); _logger(buf); }
+        cleanupOutgoingScene();
         return false; 
     }
 
@@ -172,10 +186,18 @@ bool SceneManager::setCurrentScene(const String& sceneName, void* configData) {
     sceneCount++;
     newScene->onEnter();
 
+    if (transition) {
+        _activeTransition = transition;
+        _activeTransition->begin(_outgoingScene, newScene);
+        if (_logger) _logger("[SCENEMANAGER] Scene transition started.");
+    } else {
+        cleanupOutgoingScene();
+    }
+
     return true;
 }
 
-bool SceneManager::pushScene(const String& sceneName, void* configData) { 
+bool SceneManager::pushScene(const String& sceneName, void* configData, SceneTransition* transition) { 
      if (!inputManager) { 
         if (_logger) _logger("[SCENEMANAGER] InputManager is null in pushScene.");
         return false; 
@@ -186,18 +208,28 @@ bool SceneManager::pushScene(const String& sceneName, void* configData) {
      }
      if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Pushing scene '%s'", sceneName.c_str()); _logger(buf); }
 
+    forceCleanupTransition();
+
     if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
         _previousSceneName = _sceneNameStack[sceneCount - 1];
-        sceneStack[sceneCount - 1]->onExit();
+        _outgoingScene = sceneStack[sceneCount - 1];
+        sceneStack[sceneCount - 1] = nullptr;
+        _sceneNameStack[sceneCount - 1] = "";
+        sceneCount--;
     } else {
         _previousSceneName = "";
+        _outgoingScene = nullptr;
     }
 
     Scene* newScene = createSceneByName(sceneName, configData); 
      if (!newScene) { 
         if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Failed to create scene '%s' for pushScene.", sceneName.c_str()); _logger(buf); }
-        if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
-            sceneStack[sceneCount - 1]->onEnter(); 
+        if (_outgoingScene) {
+            sceneStack[sceneCount] = _outgoingScene;
+            _sceneNameStack[sceneCount] = _previousSceneName;
+            sceneCount++;
+            _outgoingScene->onEnter();
+            _outgoingScene = nullptr;
         }
         return false;
     }
@@ -206,6 +238,20 @@ bool SceneManager::pushScene(const String& sceneName, void* configData) {
     _sceneNameStack[sceneCount] = sceneName;
     sceneCount++;
     newScene->onEnter();
+
+    if (transition) {
+        _activeTransition = transition;
+        _activeTransition->begin(_outgoingScene, newScene);
+        if (_logger) _logger("[SCENEMANAGER] Scene transition started.");
+    } else {
+        if (_outgoingScene) {
+            _outgoingScene->onExit();
+            inputManager->unregisterAllListenersForScene(_outgoingScene);
+            inputManager->clearDeferredActionsForScene(_outgoingScene);
+            delete _outgoingScene;
+            _outgoingScene = nullptr;
+        }
+    }
 
     return true;
 }
@@ -243,15 +289,60 @@ bool SceneManager::popScene() {
 }
 
 void SceneManager::update(unsigned long dt) {
-    if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
-        sceneStack[sceneCount - 1]->update(dt);
+    if (_activeTransition) {
+        if (_activeTransition->shouldUpdateOutgoing() && _outgoingScene) {
+            _outgoingScene->update(dt);
+        }
+        if (_activeTransition->shouldUpdateIncoming() && sceneCount > 0 && sceneStack[sceneCount - 1]) {
+            sceneStack[sceneCount - 1]->update(dt);
+        }
+        if (_activeTransition->update(dt)) {
+            if (_logger) _logger("[SCENEMANAGER] Scene transition completed.");
+            delete _activeTransition;
+            _activeTransition = nullptr;
+            cleanupOutgoingScene();
+        }
+    } else {
+        if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
+            sceneStack[sceneCount - 1]->update(dt);
+        }
     }
 }
 
 void SceneManager::draw(Renderer& rendererRef) { 
-    if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
-        sceneStack[sceneCount - 1]->draw(rendererRef);
+    if (_activeTransition) {
+        _activeTransition->draw(rendererRef, _outgoingScene, sceneCount > 0 ? sceneStack[sceneCount - 1] : nullptr);
+    } else {
+        if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
+            sceneStack[sceneCount - 1]->draw(rendererRef);
+        }
     }
+}
+
+bool SceneManager::shouldBlockInput() const {
+    return _activeTransition && _activeTransition->shouldBlockInput();
+}
+
+void SceneManager::cleanupOutgoingScene() {
+    if (_outgoingScene) {
+        _outgoingScene->onExit();
+        if (inputManager) {
+            inputManager->unregisterAllListenersForScene(_outgoingScene);
+            inputManager->clearDeferredActionsForScene(_outgoingScene);
+        }
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENEMANAGER] Cleaning up outgoing scene '%p'", (void*)_outgoingScene); _logger(buf); }
+        delete _outgoingScene;
+        _outgoingScene = nullptr;
+    }
+}
+
+void SceneManager::forceCleanupTransition() {
+    if (_activeTransition) {
+        if (_logger) _logger("[SCENEMANAGER] Force-cleaning up active transition.");
+        delete _activeTransition;
+        _activeTransition = nullptr;
+    }
+    cleanupOutgoingScene();
 }
 
 Scene* SceneManager::getCurrentScene() const {

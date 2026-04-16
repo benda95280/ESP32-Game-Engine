@@ -11,6 +11,7 @@
 // Forward declarations
 class InputManager;
 class Renderer;
+class SceneTransition;
 
 // Define the logger type directly to break circular dependency with EDGE.h
 using EDGELogger = std::function<void(const char* message)>;
@@ -29,12 +30,12 @@ public:
 
     bool registerScene(const String& name, SceneFactoryFunction factory);
 
-    bool setCurrentScene(const String& sceneName, void* configData = nullptr); 
-    bool pushScene(const String& sceneName, void* configData = nullptr);    
+    bool setCurrentScene(const String& sceneName, void* configData = nullptr, SceneTransition* transition = nullptr); 
+    bool pushScene(const String& sceneName, void* configData = nullptr, SceneTransition* transition = nullptr);    
     bool popScene();
 
-    void requestSetCurrentScene(const String& sceneName, void* configData = nullptr);
-    void requestPushScene(const String& sceneName, void* configData = nullptr);
+    void requestSetCurrentScene(const String& sceneName, void* configData = nullptr, SceneTransition* transition = nullptr);
+    void requestPushScene(const String& sceneName, void* configData = nullptr, SceneTransition* transition = nullptr);
 
     void update(unsigned long dt);
     void draw(Renderer& rendererRef); 
@@ -50,6 +51,9 @@ public:
     void* getPendingConfigData() const;
     bool getPendingReplaceStack() const;
     void clearPendingSceneChange();
+
+    bool isTransitioning() const { return _activeTransition != nullptr; }
+    bool shouldBlockInput() const;
 
 
 private:
@@ -67,7 +71,13 @@ private:
     void* _pendingConfigData = nullptr;
     bool _pendingReplaceStack = true;
     bool _pendingSceneChange = false;
+    SceneTransition* _pendingTransition = nullptr;
+
+    Scene* _outgoingScene = nullptr;
+    SceneTransition* _activeTransition = nullptr;
 
     Scene* createSceneByName(const String& sceneName, void* configData); 
     void clearStack();
+    void cleanupOutgoingScene();
+    void forceCleanupTransition();
 };
