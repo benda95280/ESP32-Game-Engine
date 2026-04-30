@@ -32,9 +32,12 @@ public:
     Renderer& getRenderer();
     InputManager& getInputManager();
     SceneManager& getSceneManager();
+
+    void setManualRender(bool manual) { _manualRender = manual; }
     
 private:
     EDGELogger _logger; // Logger callback provided by the application
+    bool _manualRender = false;
 
     SceneManager sceneManager;
     Renderer     renderer;

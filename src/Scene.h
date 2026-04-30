@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <functional>
+#include <stdint.h>
 
 // Define the logger type here, as it's a fundamental type the scene can use.
 using EDGELogger = std::function<void(const char* message)>;

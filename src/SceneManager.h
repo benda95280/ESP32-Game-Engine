@@ -2,6 +2,7 @@
 
 #include <Arduino.h> 
 #include <map>
+#include <string>
 #include <vector>
 #include <functional> 
 #include "Scene.h" 
@@ -65,7 +66,7 @@ private:
     InputManager* inputManager = nullptr;
     EDGELogger _logger;
 
-    std::map<String, SceneFactoryFunction> _sceneFactories;
+    std::map<std::string, SceneFactoryFunction> _sceneFactories;
 
     String _pendingNextSceneName = "";
     void* _pendingConfigData = nullptr;

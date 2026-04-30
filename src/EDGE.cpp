@@ -12,7 +12,7 @@ EDGE::EDGE(U8G2* u8g2_ptr, const DisplayConfig& displayConf, EDGELogger logger)
       deltaTime(0)
 {
     if (_logger) {
-        _logger("EDGE Engine core constructed.");
+        _logger("[CORE] EDGE Engine core constructed.");
     }
 }
 
@@ -31,7 +31,7 @@ void EDGE::init() {
     inputManager.setSceneManager(&sceneManager); 
 
     if (_logger) {
-        _logger("EDGE Engine initialized.");
+        _logger("[CORE] EDGE Engine initialized.");
     }
 }
 
@@ -48,6 +48,11 @@ void EDGE::update() {
 void EDGE::draw() {
     U8G2* u8g2_ptr = renderer.getU8G2();
     if (!u8g2_ptr) {
+        return;
+    }
+
+    if (_manualRender) {
+        sceneManager.draw(renderer); 
         return;
     }
 

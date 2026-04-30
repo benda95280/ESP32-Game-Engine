@@ -12,8 +12,7 @@ Renderer::Renderer(U8G2* u8g2_ptr, const DisplayConfig& displayConf)
 {
     // Ensure u8g2 pointer is not null
     if (!u8g2) {
-        forwardedSerial_ptr->println("[RENDERER] Renderer Error: U8G2 pointer is null!");
-        // Handle error appropriately, maybe halt execution or set an error state
+        if (_logger) _logger("[RENDERER] Renderer Error: U8G2 pointer is null!");
     }
      // Calculate offsets based on config if they weren't provided or are default
      xOffset = displayConf.xOffset;
@@ -29,7 +28,7 @@ void Renderer::init() {
     u8g2->begin();
     u8g2->setContrast(255); // Max contrast
     u8g2->setFont(u8g2_font_5x7_tf); // Default font
-    forwardedSerial_ptr->println("[RENDERER] Renderer initialized.");
+    if (_logger) _logger("[RENDERER] Renderer initialized.");
 }
 
 void Renderer::beginFrame() {
