@@ -5,6 +5,7 @@ class Renderer;
 
 class SceneTransition {
 public:
+    bool autoDelete = true;
     virtual ~SceneTransition() = default;
 
     virtual void begin(Scene* outgoing, Scene* incoming) {}

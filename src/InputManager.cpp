@@ -1,69 +1,53 @@
 #include "InputManager.h"
 #include "SceneManager.h" 
-#include "GEM_u8g2.h"     
 #include <algorithm>      
 #include <Arduino.h>      
-#include <deque> 
 
 extern void updateLastActivityTime();
 
 
 void InputManager::init() {
+    if (_queueMutex == nullptr) {
+        _queueMutex = xSemaphoreCreateMutex();
+    }
     listeners.clear();
+    xSemaphoreTake(_queueMutex, portMAX_DELAY);
     _deferredActionsQueue.clear(); 
-    keyQueue = NULL; 
+    xSemaphoreGive(_queueMutex);
 }
 
 void InputManager::update(unsigned long dt) {
-    int actionsToProcessThisFrame = _deferredActionsQueue.size(); 
+    int actionsToProcessThisFrame = 0;
+    xSemaphoreTake(_queueMutex, portMAX_DELAY);
+    actionsToProcessThisFrame = _deferredActionsQueue.size();
+    xSemaphoreGive(_queueMutex);
+
     actionsToProcessThisFrame = std::min(actionsToProcessThisFrame, 3); 
     
-    for (int i = 0; i < actionsToProcessThisFrame && !_deferredActionsQueue.empty(); ++i) {
-        DeferredActionEntry entry = _deferredActionsQueue.front();
-        _deferredActionsQueue.pop_front(); 
-
+    for (int i = 0; i < actionsToProcessThisFrame; ++i) {
+        DeferredActionEntry entry;
+        xSemaphoreTake(_queueMutex, portMAX_DELAY);
+        if (_deferredActionsQueue.empty()) {
+            xSemaphoreGive(_queueMutex);
+            break;
+        }
+        entry = _deferredActionsQueue.front();
+        _deferredActionsQueue.pop_front();
+        xSemaphoreGive(_queueMutex);
+        
         if (entry.action) { 
-            if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] Executing deferred action for scene %p.", entry.ownerScene); _logger(buf); }
+            if (_logger) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "[INPUT] Executing deferred action for scene %p.", entry.ownerScene);
+                _logger(buf);
+            }
             entry.action(); 
         }
     }
 }
 
-void InputManager::processQueuedKeys() {
-    if (keyQueue == NULL) return;
-
-    uint8_t receivedKeyCode;
-    if (xQueueReceive(keyQueue, &receivedKeyCode, 0) == pdPASS) {
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] InputManager: Received GEM Key %d from queue", receivedKeyCode); _logger(buf); }
-
-        if (!sceneManager) {
-            if (_logger) _logger("[INPUT] InputManager Error: SceneManager is NULL in processQueuedKeys.");
-            return;
-        }
-
-        Scene* currentScene = sceneManager->getCurrentScene();
-        String currentSceneName = sceneManager->getCurrentSceneName();
-        if (!currentScene) {
-            if (_logger) _logger("[INPUT] InputManager Warning: No active scene to process queued key.");
-            return;
-        }
-        
-        if (currentScene->usesKeyQueue()) {
-            if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] InputManager: Forwarding key %d to scene %p (name: %s) for processing", receivedKeyCode, (void*)currentScene, currentSceneName); _logger(buf); }
-            currentScene->processKeyPress(receivedKeyCode);
-        } else {
-            if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] InputManager: Key %d received, but scene %p (name: %s) does not use key queue.", receivedKeyCode, (void*)currentScene, currentSceneName); _logger(buf); }
-        }
-    }
-}
-
-
 void InputManager::setSceneManager(SceneManager* sm) {
     sceneManager = sm;
-}
-
-void InputManager::setKeyQueue(QueueHandle_t queue) {
-    keyQueue = queue;
 }
 
 bool InputManager::registerButtonListener(EDGE_Button button, EDGE_Event eventType, Scene* scene, DeferredAction callback) {
@@ -71,11 +55,19 @@ bool InputManager::registerButtonListener(EDGE_Button button, EDGE_Event eventTy
         if (_logger) _logger("[INPUT] Error: Invalid scene or callback provided for listener registration.");
         return false;
     }
+
+    // Prevent duplicate registrations of the identical event/scene combo
+    for (const auto& listener : listeners) {
+        if (listener.button == button && listener.eventType == eventType && listener.scene == scene) {
+            if (_logger) _logger("[INPUT] Warning: Listener already registered for this button/event/scene combo.");
+            return false;
+        }
+    }
+
     listeners.push_back({button, eventType, scene, callback}); 
     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] InputManager: Registered listener for button %d, event %d, scene %p", (int)button, (int)eventType, scene); _logger(buf); }
     return true;
 }
-
 void InputManager::unregisterButtonListener(EDGE_Button button, EDGE_Event eventType, Scene* scene) {
     std::erase_if(listeners, [button, eventType, scene](const ListenerInfo& listener) {
         return listener.button == button && listener.eventType == eventType && listener.scene == scene;
@@ -107,14 +99,12 @@ void InputManager::processButtonEvent(EDGE_Button button, EDGE_Event eventType) 
     }
 
     Scene* currentScene = sceneManager->getCurrentScene();
-    String currentSceneName = sceneManager->getCurrentSceneName();
+    // [FIX] Avoid String allocation to prevent heap fragmentation and UB in snprintf
+    const char* currentSceneName = sceneManager->getCurrentSceneName();
     if (!currentScene) {
         if (_logger) _logger("[INPUT] InputManager Warning: No active scene to process event!");
         return; 
     }
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] InputManager: Current scene name: %s, usesKeyQueue: %s", currentSceneName, currentScene->usesKeyQueue() ? "true" : "false"); _logger(buf); }
-
-    bool useKeyQueue = currentScene->usesKeyQueue();
 
     bool hasListeners = false;
     for (const auto& listener : listeners) {
@@ -124,36 +114,16 @@ void InputManager::processButtonEvent(EDGE_Button button, EDGE_Event eventType) 
         }
     }
 
-    if (!hasListeners && !useKeyQueue) {
+    if (!hasListeners) {
         static uint32_t lastWarnTime = 0;
         uint32_t now = millis();
         if (_logger && (now - lastWarnTime > 1000)) {
             char buf[150];
-            snprintf(buf, sizeof(buf), "[INPUT] No listeners for scene '%s', ignoring button events", currentSceneName.c_str());
+            snprintf(buf, sizeof(buf), "[INPUT] No listeners for scene '%s', ignoring button events", currentSceneName);
             _logger(buf);
             lastWarnTime = now;
         }
         return;
-    }
-
-    if (useKeyQueue && keyQueue != NULL) {
-        uint8_t gemKeyCode = GEM_KEY_NONE;
-        if (button == EDGE_Button::UP && eventType == EDGE_Event::CLICK) { gemKeyCode = GEM_KEY_UP; } 
-        else if (button == EDGE_Button::DOWN && eventType == EDGE_Event::CLICK) { gemKeyCode = GEM_KEY_DOWN; } 
-        else if (button == EDGE_Button::OK && eventType == EDGE_Event::CLICK) { gemKeyCode = GEM_KEY_OK; } 
-        else if (button == EDGE_Button::OK && eventType == EDGE_Event::LONG_PRESS) { gemKeyCode = GEM_KEY_CANCEL; }
-        else if (button == EDGE_Button::CANCEL && eventType == EDGE_Event::CLICK) { gemKeyCode = GEM_KEY_CANCEL; }
-
-        if (gemKeyCode != GEM_KEY_NONE) {
-            if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] InputManager: Attempting to send GEM Key %d to queue.", gemKeyCode); _logger(buf); }
-            if (xQueueSend(keyQueue, &gemKeyCode, 0) != pdPASS) {
-                if (_logger) _logger("[INPUT] InputManager Warning: Key queue full!");
-            } else {
-                if (_logger) _logger("[INPUT] InputManager: GEM Key sent successfully.");
-            }
-        }
-    } else if (useKeyQueue && keyQueue == NULL) {
-        if (_logger) _logger("[INPUT] InputManager Error: Scene uses key queue, but keyQueue is NULL!");
     }
 
     bool eventDeferred = false;
@@ -167,23 +137,27 @@ void InputManager::processButtonEvent(EDGE_Button button, EDGE_Event eventType) 
         }
     }
 
-    if (!useKeyQueue && !eventDeferred) {
+    if (!eventDeferred) {
         if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] InputManager: No direct callback found or deferred for button %d, event %d on non-queued scene %p.", (int)button, (int)eventType, currentScene); _logger(buf); }
     }
 }
 
 void InputManager::deferAction(Scene* ownerScene, DeferredAction action) {
     if (!ownerScene || !action) return;
+    xSemaphoreTake(_queueMutex, portMAX_DELAY);
     _deferredActionsQueue.push_back({ownerScene, action});
+    xSemaphoreGive(_queueMutex);
 }
 
 void InputManager::clearDeferredActionsForScene(Scene* scene) {
     if (!scene) return;
+    xSemaphoreTake(_queueMutex, portMAX_DELAY);
     size_t initialSize = _deferredActionsQueue.size();
     std::erase_if(_deferredActionsQueue, [scene](const DeferredActionEntry& entry) {
         return entry.ownerScene == scene;
     });
     size_t removedCount = initialSize - _deferredActionsQueue.size();
+    xSemaphoreGive(_queueMutex);
     if (removedCount > 0) {
         if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[INPUT] InputManager: Cleared %u deferred actions for scene %p", (unsigned int)removedCount, scene); _logger(buf); }
     }

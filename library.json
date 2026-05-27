@@ -1,7 +1,7 @@
 {
     "name": "EDGE",
-    "description": "EDGE (ESP Device Game Engine) : A lightweight game engine for ESP devices using U8G2 graphics library. Might work on other devices compatible with U8G2 library.",
-    "keywords": ["esp32", "game engine", "u8g2", "graphics", "game", "engine"],
+    "description": "EDGE (ESP Device Game Engine) : A lightweight, display-agnostic game engine for ESP devices. Can be used with U8G2 or other graphics libraries via custom renderers.",
+    "keywords": ["esp32", "game engine", "graphics", "game", "engine", "embedded", "display-agnostic"],
     "version": "0.2.0",
     "authors": [
       {
@@ -12,18 +12,10 @@
       }
     ],
     "license": "MIT",
-    "dependencies": {
-      "U8g2": "*"
-    },
     "frameworks": ["arduino"],
     "platforms": ["espressif32"],
     "repository": {
       "type": "git",
       "url": "https://github.com/nbourre/ESP32-Game-Engine.git"
-    },
-    "examples": [
-      "examples/BouncingBall",
-      "examples/FlappyBird"
-    ]
+    }
   }
-  

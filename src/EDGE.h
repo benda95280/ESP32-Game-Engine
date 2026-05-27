@@ -12,7 +12,6 @@ using EDGELogger = std::function<void(const char* message)>;
 #include "SceneManager.h"
 #include "InputManager.h"
 #include "Renderer.h"
-#include "DisplayConfig.h"
 
 
 // --- Forward declarations ---
@@ -20,11 +19,11 @@ class Scene;
 
 class EDGE {
 public:
-    EDGE(U8G2* u8g2_ptr, const DisplayConfig& displayConf, EDGELogger logger = nullptr);
+    EDGE(Renderer& renderer, EDGELogger logger = nullptr);
     ~EDGE();
 
     void init();
-    void update();
+    void update(unsigned long forcedDeltaTime = 0);
     void draw();
 
     unsigned long getDeltaTime() const { return deltaTime; }
@@ -32,15 +31,12 @@ public:
     Renderer& getRenderer();
     InputManager& getInputManager();
     SceneManager& getSceneManager();
-
-    void setManualRender(bool manual) { _manualRender = manual; }
     
 private:
     EDGELogger _logger; // Logger callback provided by the application
-    bool _manualRender = false;
 
     SceneManager sceneManager;
-    Renderer     renderer;
+    Renderer&    renderer;
     InputManager inputManager;
 
     unsigned long previousMillis;

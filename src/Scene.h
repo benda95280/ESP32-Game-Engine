@@ -1,43 +1,41 @@
 #pragma once
-#include <vector>
-#include <functional>
-#include <stdint.h>
 
-// Define the logger type here, as it's a fundamental type the scene can use.
+#include <functional> // For std::function
+#include "Renderer.h"
+
+// Define the logger type directly to break circular dependency with EDGE.h
 using EDGELogger = std::function<void(const char* message)>;
-
-#define MAX_ENTITIES 10  
-
-// --- Forward declarations ---
-class Renderer;
-class InputManager; 
-
-class Entity;
-
 
 class Scene {
 public:
-    virtual ~Scene(); 
+    using DeferredAction = std::function<void()>;
 
-    virtual void init(); 
-    virtual void onEnter() {}; 
-    virtual void onExit() {};  
-    virtual void update(unsigned long deltaTime);
+    virtual ~Scene();
+
+    // Optional initialization - passed from GameContext or similar
+    virtual void init(void* context = nullptr);
+
+    // Called once when the scene becomes active
+    virtual void onEnter() {}
+
+    // Called once when the scene is deactivated
+    virtual void onExit() {}
+
+    // Called every frame to update game logic
+    virtual void update(unsigned long deltaTime) = 0;
+
+    // Called every frame to draw the scene
     virtual void draw(Renderer& renderer); 
 
-    bool doesManageOwnDrawing() const { return managesOwnDrawing; }
-    virtual bool usesKeyQueue() const { return false; }
-    virtual void processKeyPress(uint8_t keyCode) {}
+    virtual bool doesManageOwnDrawing() const { return managesOwnDrawing; }
     
     virtual class DialogBox* getDialogBox() { return nullptr; }
 
+    void setLogger(EDGELogger logger) { _logger = logger; }
     static void setMasterLogger(EDGELogger logger) { _masterLogger = logger; }
 
 protected:
-    std::vector<Entity*> entities;
-    
-    bool managesOwnDrawing = false;
-    
-    // Static logger for all scene instances to use
+    bool managesOwnDrawing = false; // Set to true if scene handles its own firstPage/nextPage loop
+    EDGELogger _logger;
     static EDGELogger _masterLogger;
 };

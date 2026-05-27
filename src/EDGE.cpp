@@ -2,11 +2,11 @@
 #include "Scene.h" 
 #include <Arduino.h>
 
-// Constructor - Updated to accept a logger callback
-EDGE::EDGE(U8G2* u8g2_ptr, const DisplayConfig& displayConf, EDGELogger logger)
+// Constructor - Updated to accept a renderer reference and optional logger
+EDGE::EDGE(Renderer& rendererRef, EDGELogger logger)
     : _logger(logger),
       sceneManager(), 
-      renderer(u8g2_ptr, displayConf),
+      renderer(rendererRef),
       inputManager(),
       previousMillis(0),
       deltaTime(0)
@@ -20,12 +20,10 @@ EDGE::EDGE(U8G2* u8g2_ptr, const DisplayConfig& displayConf, EDGELogger logger)
 EDGE::~EDGE() {}
 
 void EDGE::init() {
-    // Propagate the logger to all engine sub-components
-    renderer.setLogger(_logger);
+    // Propagate the logger to engine sub-components
     inputManager.setLogger(_logger);
     sceneManager.setLogger(_logger);
     
-    renderer.init();
     inputManager.init();
     sceneManager.setInputManager(&inputManager);
     inputManager.setSceneManager(&sceneManager); 
@@ -35,10 +33,21 @@ void EDGE::init() {
     }
 }
 
-void EDGE::update() {
+void EDGE::update(unsigned long forcedDeltaTime) {
     unsigned long currentMillis = millis();
-    deltaTime = currentMillis - previousMillis;
-    previousMillis = currentMillis;
+    
+    // Prevent massive delta time explosion on the very first frame after system boot
+    if (previousMillis == 0) {
+        previousMillis = currentMillis;
+    }
+
+    if (forcedDeltaTime > 0) {
+        deltaTime = forcedDeltaTime;
+        previousMillis = currentMillis; // Sync the tracker
+    } else {
+        deltaTime = currentMillis - previousMillis;
+        previousMillis = currentMillis;
+    }
 
     sceneManager.processSceneChanges();
     inputManager.update(deltaTime); 
@@ -46,31 +55,8 @@ void EDGE::update() {
 }
 
 void EDGE::draw() {
-    U8G2* u8g2_ptr = renderer.getU8G2();
-    if (!u8g2_ptr) {
-        return;
-    }
-
-    if (_manualRender) {
-        sceneManager.draw(renderer); 
-        return;
-    }
-
-    if (sceneManager.isTransitioning()) {
-        sceneManager.draw(renderer);
-        u8g2_ptr->sendBuffer();
-        return;
-    }
-
-    Scene* currentScene = sceneManager.getCurrentScene();
-    if (currentScene && currentScene->doesManageOwnDrawing()) {
-        sceneManager.draw(renderer); 
-    } else {
-        u8g2_ptr->firstPage();
-        do {
-            sceneManager.draw(renderer); 
-        } while (u8g2_ptr->nextPage());
-    }
+    // Hardware-specific buffering is now handled entirely by the host application.
+    sceneManager.draw(renderer);
 }
 
 Renderer& EDGE::getRenderer() { return renderer; }

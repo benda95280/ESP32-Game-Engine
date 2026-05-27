@@ -2,24 +2,22 @@
 
 ## About This Rewrite
 
-This repository is a comprehensive rewrite of the original [ESP32-Game-Engine by Nicolas Bourré](https://github.com/nbourre/ESP32-Game-Engine). While building on its core concepts, this version introduces significant architectural changes to improve flexibility, modularity, and testability.
+This repository is a comprehensive rewrite of the original [ESP32-Game-Engine by Nicolas Bourré](https://github.com/nbourre/ESP32-Game-Engine). While building on its core concepts, this version introduces significant architectural changes to improve flexibility, modularity, and portability.
 
 ### Key Changes in this Rewrite
 
-*   **Core Architectural Refactoring (Dependency Injection):** The engine is now decoupled from specific hardware initializations. Instead of creating its own `U8G2` display object, the `EDGE` engine and `Renderer` now receive a pointer to an already-initialized `U8G2` object. This makes the engine more flexible and easier to integrate into existing projects.
+*   **Display-Agnostic Core (Pure Abstraction):** The engine is now completely decoupled from specific hardware or graphics libraries. It uses an abstract `Renderer` interface. The host application provides a concrete implementation of this interface (e.g., wrapping `U8G2`, `Adafruit_GFX`, or even a serial terminal).
+
+*   **Core Architectural Refactoring (Dependency Injection):** The engine and its components no longer manage hardware initialization. All dependencies (Renderer, Logger) are injected at runtime, allowing the engine to run in diverse environments.
 
 *   **Advanced Scene Management:** The scene manager has been completely overhauled.
     *   **Factory-Based Creation:** Scenes are now registered with a name and created via a factory function (`registerScene`).
-    *   **Scene Stack:** The manager now operates as a proper stack, with `pushScene` and `popScene` methods.
-    *   **Lifecycle Hooks:** Scenes now have `onEnter()` and `onExit()` methods, which are called automatically during scene transitions.
+    *   **Scene Stack:** The manager operates as a proper stack, with `pushScene` and `popScene` methods.
+    *   **Lifecycle Hooks:** Scenes have `onEnter()` and `onExit()` methods, called automatically during transitions.
 
-*   **Reworked Input System:** The `InputManager` is now uses generic enums (`EDGE_Button`, `EDGE_Event`) and a deferred action queue to process inputs.
+*   **Reworked Input System:** The `InputManager` uses generic enums (`EDGE_Button`, `EDGE_Event`) and a deferred action queue to process inputs without being tied to specific hardware buttons or external UI libraries.
 
-*   **Integrated Logging:** A flexible, callback-based logging system (`EDGELogger`) has been integrated throughout the engine, making debugging significantly easier.
-
-*   **Dependency & Example Updates:**
-    *   The `OneButton` and `SafeString` libraries are no longer dependencies.
-    *   **The original examples (`BouncingBall`, `FlappyBird`, etc.) have been removed** as they are incompatible with the new architecture.
+*   **Integrated Logging:** A flexible, callback-based logging system (`EDGELogger`) is integrated throughout the engine core.
 
 ---
 
@@ -28,19 +26,19 @@ This repository is a comprehensive rewrite of the original [ESP32-Game-Engine by
 - [The ESP Device Game Engine (EDGE)](#the-esp-device-game-engine-edge)
   - [Features](#features)
   - [Project Structure](#project-structure)
-  - [Contributing](#contributing)
+  - [Usage](#usage)
   - [License](#license)
   - [Credits](#credits)
 
 ---
 
 ## Features
-- **Decoupled architecture** using dependency injection.
+- **Display-agnostic architecture** via the abstract `Renderer` interface.
+- **Dependency-free core**: No mandatory external library dependencies within the engine itself.
 - **Advanced scene management** with a scene stack, factories, and lifecycle hooks.
-- **Abstracted input system** to cleanly handle user input.
-- **Customizable renderer** for any `U8g2`-compatible display.
-- **Integrated callback-based logger** for easy debugging.
-- **Optimized for embedded systems** with a focus on memory efficiency.
+- **Abstracted input system** using deferred callbacks and generic enums.
+- **Integrated callback-based logger** for flexible debugging.
+- **Optimized for embedded systems** with a focus on memory efficiency and decoupling.
 
 ---
 
@@ -51,26 +49,35 @@ EDGE/
 │   ├── EDGE.h / EDGE.cpp              # Core engine, ties components together
 │   ├── Scene.h / Scene.cpp            # Base class for all scenes
 │   ├── SceneManager.h / SceneManager.cpp  # Handles scene stack, factories, and transitions
-│   ├── Renderer.h / Renderer.cpp      # U8g2-based graphics rendering
-│   ├── InputManager.h / InputManager.cpp  # Abstracted button/input handling
-│   ├── DisplayConfig.h                # Configuration for display settings
+│   ├── Renderer.h                     # Abstract graphics rendering interface
+│   ├── InputManager.h / InputManager.cpp  # Abstracted button/event handling
 ├── README.md                          # Documentation
 ├── platformio.ini                     # PlatformIO project configuration
 ```
 
 ---
 
-## Contributing
-- **Fork the repo** and submit **pull requests**.
-- **Report bugs or suggest features** via GitHub issues.
-- **Share your own scenes/games** using EDGE.
+## Usage
+
+To use EDGE, your application must provide a concrete implementation of the `Renderer` interface.
+
+```cpp
+class MyRenderer : public Renderer {
+    // Implement drawText, drawCircle, getNativeDisplay, etc.
+};
+
+// ... in setup ...
+MyRenderer renderer;
+EDGE engine(renderer, [](const char* msg) { Serial.println(msg); });
+engine.init();
+```
 
 ---
 
 ## License
 This project is open-source under the **MIT License**.
 
-The original work by **Nicolas Bourré** is also licensed under the MIT License. This rewritten version is a derivative work and is therefore also provided under the same license terms. See the [LICENSE](LICENSE) file for more details.
+The original work by **Nicolas Bourré** is also licensed under the MIT License. This rewritten version is a derivative work and is therefore also provided under the same license terms.
 
 ---
 

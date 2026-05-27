@@ -1,15 +1,12 @@
 #pragma once
-#include <vector>
+#include <deque>
 #include <string>
 #include <functional>
 #include <utility> 
-#include <deque>   
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "Scene.h" 
 
-// --- FreeRTOS Queue ---
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-// --- End FreeRTOS Queue ---
 
 // Define the logger type directly to break circular dependency with EDGE.h
 using EDGELogger = std::function<void(const char* message)>;
@@ -61,11 +58,9 @@ public:
 
     void init();
     void update(unsigned long dt); 
-    void processQueuedKeys(); 
     void setLogger(EDGELogger logger) { _logger = logger; }
 
     void setSceneManager(SceneManager* sm);
-    void setKeyQueue(QueueHandle_t queue); 
     
     // Method signatures are now updated to use abstract types
     bool registerButtonListener(EDGE_Button button, EDGE_Event eventType, Scene* scene, DeferredAction callback);
@@ -78,9 +73,9 @@ public:
 private:
     std::vector<ListenerInfo> listeners; 
     SceneManager* sceneManager = nullptr; 
-    QueueHandle_t keyQueue = NULL;        
     EDGELogger _logger;
     
     std::deque<DeferredActionEntry> _deferredActionsQueue; 
+    SemaphoreHandle_t _queueMutex = nullptr;
     void deferAction(Scene* ownerScene, DeferredAction action); 
 };

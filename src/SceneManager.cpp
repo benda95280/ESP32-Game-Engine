@@ -6,6 +6,7 @@
 #include <Arduino.h>         
 #include <vector>            
 #include <string>
+#include <cstring>
 
 SceneManager::SceneManager() : _logger(nullptr) {
     // Constructor is now empty. Dependencies will be injected.
@@ -25,10 +26,10 @@ void SceneManager::setLogger(EDGELogger logger) {
 
 // --- NEW GETTER IMPLEMENTATIONS ---
 bool SceneManager::isSceneChangePending() const { return _pendingSceneChange; }
-String SceneManager::getPendingSceneName() const { return _pendingNextSceneName; }
+const char* SceneManager::getPendingSceneName() const { return _pendingNextSceneName.c_str(); }
 void* SceneManager::getPendingConfigData() const { return _pendingConfigData; }
 bool SceneManager::getPendingReplaceStack() const { return _pendingReplaceStack; }
-String SceneManager::getPreviousSceneName() const { return _previousSceneName; }
+const char* SceneManager::getPreviousSceneName() const { return _previousSceneName.c_str(); }
 // --- END NEW GETTER IMPLEMENTATIONS ---
 
 void SceneManager::processSceneChanges() {
@@ -38,16 +39,21 @@ void SceneManager::processSceneChanges() {
 
     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Processing scene change request. Target: %s, Replace: %s", _pendingNextSceneName.c_str(), _pendingReplaceStack ? "true" : "false"); _logger(buf); }
 
-    String nameToSet = _pendingNextSceneName;
+    std::string nameToSet = _pendingNextSceneName;
     bool replace = _pendingReplaceStack;
     void* configPtr = _pendingConfigData;
     SceneTransition* transition = _pendingTransition;
 
-    if (nameToSet != "UNKNOWN" && nameToSet != "") {
+    if (!nameToSet.empty() && nameToSet != "UNKNOWN") {
+        bool success = false;
         if (replace) {
-            setCurrentScene(nameToSet, configPtr, transition);
+            success = setCurrentScene(nameToSet.c_str(), configPtr, transition);
         } else {
-            pushScene(nameToSet, configPtr, transition);
+            success = pushScene(nameToSet.c_str(), configPtr, transition);
+        }
+        
+        if (success) {
+            _pendingTransition = nullptr; // Successfully handed off to activeTransition, clear it so clearPendingSceneChange doesn't delete it
         }
     } else {
         if (_logger) _logger("[SCENES] Scene change NOT processed. Target name was invalid.");
@@ -61,42 +67,55 @@ void SceneManager::setInputManager(InputManager* manager) {
 }
 
 
-bool SceneManager::registerScene(const String& name, SceneFactoryFunction factory) {
+bool SceneManager::registerScene(const char* name, SceneFactoryFunction factory) {
     if (!factory) {
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Tried to register a null factory for Scene '%s'", name.c_str()); _logger(buf); }
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Tried to register a null factory for Scene '%s'", name ? name : "NULL"); _logger(buf); }
         return false;
     }
-    if (name.isEmpty()) {
+    if (!name || name[0] == '\0') {
         if (_logger) _logger("[SCENES] Scene name cannot be empty for registration.");
         return false;
     }
 
-    bool replacedFactory = _sceneFactories.count(name.c_str());
+    auto it = std::find_if(_sceneFactories.begin(), _sceneFactories.end(), [&](const auto& pair) {
+        return pair.first == name;
+    });
 
-    if (replacedFactory) {
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Overwriting factory registration for Scene '%s'.", name.c_str()); _logger(buf); }
+    if (it != _sceneFactories.end()) {
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Overwriting factory registration for Scene '%s'.", name); _logger(buf); }
+        it->second = factory;
+    } else {
+        _sceneFactories.push_back({name, factory});
     }
-    
-    _sceneFactories[name.c_str()] = factory;
 
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Registered Scene '%s' with its factory.", name.c_str()); _logger(buf); }
+    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Registered Scene '%s' with its factory.", name); _logger(buf); }
     return true;
 }
 
-void SceneManager::requestSetCurrentScene(const String& sceneName, void* configData, SceneTransition* transition) {
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Requesting to SET current scene to '%s'", sceneName.c_str()); _logger(buf); }
+void SceneManager::requestSetCurrentScene(const char* sceneName, void* configData, SceneTransition* transition) {
+    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Requesting to SET current scene to '%s'", sceneName ? sceneName : "NULL"); _logger(buf); }
     
-    _pendingNextSceneName = sceneName;
+    if (_pendingTransition && _pendingTransition != transition) {
+        if (_pendingTransition->autoDelete) {
+            delete _pendingTransition;
+        }
+    }
+    _pendingNextSceneName = sceneName ? sceneName : "";
     _pendingConfigData = configData;
     _pendingTransition = transition;
     _pendingReplaceStack = true;
     _pendingSceneChange = true;
 }
 
-void SceneManager::requestPushScene(const String& sceneName, void* configData, SceneTransition* transition) {
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Requesting to PUSH scene '%s'", sceneName.c_str()); _logger(buf); }
+void SceneManager::requestPushScene(const char* sceneName, void* configData, SceneTransition* transition) {
+    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Requesting to PUSH scene '%s'", sceneName ? sceneName : "NULL"); _logger(buf); }
 
-    _pendingNextSceneName = sceneName;
+    if (_pendingTransition && _pendingTransition != transition) {
+        if (_pendingTransition->autoDelete) {
+            delete _pendingTransition;
+        }
+    }
+    _pendingNextSceneName = sceneName ? sceneName : "";
     _pendingConfigData = configData;
     _pendingTransition = transition;
     _pendingReplaceStack = false;
@@ -106,10 +125,13 @@ void SceneManager::requestPushScene(const String& sceneName, void* configData, S
 void SceneManager::clearPendingSceneChange() {
     _pendingSceneChange = false;
     _pendingNextSceneName = "";
-    if (_pendingConfigData) {
-        _pendingConfigData = nullptr;
+    _pendingConfigData = nullptr;
+    if (_pendingTransition) {
+        if (_pendingTransition->autoDelete) {
+            delete _pendingTransition;
+        }
+        _pendingTransition = nullptr;
     }
-    _pendingTransition = nullptr;
 }
 
 void SceneManager::clearStack() {
@@ -129,12 +151,17 @@ void SceneManager::clearStack() {
     sceneCount = 0;
 }
 
-Scene* SceneManager::createSceneByName(const String& sceneName, void* configData) {
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Attempting to create scene '%s' using factory.", sceneName.c_str()); _logger(buf); }
+Scene* SceneManager::createSceneByName(const char* sceneName, void* configData) {
+    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Attempting to create scene '%s' using factory.", sceneName ? sceneName : "NULL"); _logger(buf); }
     
-    auto it = _sceneFactories.find(sceneName.c_str());
+    if (!sceneName) return nullptr;
+
+    auto it = std::find_if(_sceneFactories.begin(), _sceneFactories.end(), [&](const auto& pair) {
+        return pair.first == sceneName;
+    });
+
     if (it == _sceneFactories.end()) {
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] No factory registered for Scene '%s'!", sceneName.c_str()); _logger(buf); }
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] No factory registered for Scene '%s'!", sceneName); _logger(buf); }
         return nullptr;
     }
 
@@ -142,23 +169,33 @@ Scene* SceneManager::createSceneByName(const String& sceneName, void* configData
     Scene* newScene = factory(configData); 
 
     if (newScene == nullptr) {
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Factory for Scene '%s' returned null!", sceneName.c_str()); _logger(buf); }
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Factory for Scene '%s' returned null!", sceneName); _logger(buf); }
         return nullptr;
     }
 
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Factory created scene '%s' at %p, calling generic init...", sceneName.c_str(), newScene); _logger(buf); }
+    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Factory created scene '%s' at %p, calling generic init...", sceneName, (void*)newScene); _logger(buf); }
     // newScene->init(); // init() is now called by the factory function in Main.cpp
 
     return newScene;
 }
 
+Scene* SceneManager::setupNewScene(const char* sceneName, void* configData) {
+    Scene* newScene = createSceneByName(sceneName, configData);
+    if (!newScene) return nullptr;
+    sceneStack[sceneCount] = newScene;
+    _sceneNameStack[sceneCount] = sceneName ? sceneName : "";
+    sceneCount++;
+    newScene->onEnter();
+    return newScene;
+}
 
-bool SceneManager::setCurrentScene(const String& sceneName, void* configData, SceneTransition* transition) { 
+
+bool SceneManager::setCurrentScene(const char* sceneName, void* configData, SceneTransition* transition) { 
     if (!inputManager) { 
         if (_logger) _logger("[SCENES] InputManager is null in setCurrentScene.");
         return false; 
     }
-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Setting current scene to '%s'", sceneName.c_str()); _logger(buf); }
+    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Setting current scene to '%s'", sceneName ? sceneName : "NULL"); _logger(buf); }
 
     forceCleanupTransition();
 
@@ -175,17 +212,12 @@ bool SceneManager::setCurrentScene(const String& sceneName, void* configData, Sc
 
     clearStack(); 
 
-    Scene* newScene = createSceneByName(sceneName, configData); 
+    Scene* newScene = setupNewScene(sceneName, configData);
     if (!newScene) { 
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Failed to create scene '%s' for setCurrentScene.", sceneName.c_str()); _logger(buf); }
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Failed to create scene '%s' for setCurrentScene.", sceneName ? sceneName : "NULL"); _logger(buf); }
         cleanupOutgoingScene();
         return false; 
     }
-
-    sceneStack[sceneCount] = newScene;
-    _sceneNameStack[sceneCount] = sceneName;
-    sceneCount++;
-    newScene->onEnter();
 
     if (transition) {
         _activeTransition = transition;
@@ -198,7 +230,7 @@ bool SceneManager::setCurrentScene(const String& sceneName, void* configData, Sc
     return true;
 }
 
-bool SceneManager::pushScene(const String& sceneName, void* configData, SceneTransition* transition) { 
+bool SceneManager::pushScene(const char* sceneName, void* configData, SceneTransition* transition) { 
      if (!inputManager) { 
         if (_logger) _logger("[SCENES] InputManager is null in pushScene.");
         return false; 
@@ -207,38 +239,27 @@ bool SceneManager::pushScene(const String& sceneName, void* configData, SceneTra
         if (_logger) _logger("[SCENES] Scene stack full, cannot push.");
         return false; 
      }
-     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Pushing scene '%s'", sceneName.c_str()); _logger(buf); }
+     if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Pushing scene '%s'", sceneName ? sceneName : "NULL"); _logger(buf); }
 
     forceCleanupTransition();
 
     if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
         _previousSceneName = _sceneNameStack[sceneCount - 1];
         _outgoingScene = sceneStack[sceneCount - 1];
-        sceneStack[sceneCount - 1] = nullptr;
-        _sceneNameStack[sceneCount - 1] = "";
-        sceneCount--;
+        // Do NOT remove the outgoing scene from the stack or decrement sceneCount!
     } else {
         _previousSceneName = "";
         _outgoingScene = nullptr;
     }
 
-    Scene* newScene = createSceneByName(sceneName, configData); 
+    Scene* newScene = setupNewScene(sceneName, configData);
      if (!newScene) { 
-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Failed to create scene '%s' for pushScene.", sceneName.c_str()); _logger(buf); }
-        if (_outgoingScene) {
-            sceneStack[sceneCount] = _outgoingScene;
-            _sceneNameStack[sceneCount] = _previousSceneName;
-            sceneCount++;
-            _outgoingScene->onEnter();
-            _outgoingScene = nullptr;
-        }
+        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Failed to create scene '%s' for pushScene.", sceneName ? sceneName : "NULL"); _logger(buf); }
+        // FIX: _outgoingScene was never removed from the stack, so do not re-add it!
+        // Just park the pointer safely.
+        _outgoingScene = nullptr;
         return false;
     }
-
-    sceneStack[sceneCount] = newScene;
-    _sceneNameStack[sceneCount] = sceneName;
-    sceneCount++;
-    newScene->onEnter();
 
     if (transition) {
         _activeTransition = transition;
@@ -247,9 +268,7 @@ bool SceneManager::pushScene(const String& sceneName, void* configData, SceneTra
     } else {
         if (_outgoingScene) {
             _outgoingScene->onExit();
-            inputManager->unregisterAllListenersForScene(_outgoingScene);
-            inputManager->clearDeferredActionsForScene(_outgoingScene);
-            delete _outgoingScene;
+            // Do NOT delete the outgoing scene, it remains parked in the stack
             _outgoingScene = nullptr;
         }
     }
@@ -262,9 +281,11 @@ bool SceneManager::popScene() {
         if (_logger) _logger("[SCENES] InputManager is null in popScene.");
         return false; 
      }
+    forceCleanupTransition(); // Stop any drawing pointers referring to about-to-be-deleted memory
+
     if (sceneCount > 0) {
         Scene* removedScene = sceneStack[sceneCount - 1];
-        String removedSceneName = _sceneNameStack[sceneCount - 1];
+        std::string removedSceneName = _sceneNameStack[sceneCount - 1];
         if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Popping scene '%s'", removedSceneName.c_str()); _logger(buf); }
 
         if (removedScene) {
@@ -299,7 +320,9 @@ void SceneManager::update(unsigned long dt) {
         }
         if (_activeTransition->update(dt)) {
             if (_logger) _logger("[SCENES] Scene transition completed.");
-            delete _activeTransition;
+            if (_activeTransition->autoDelete) {
+                delete _activeTransition;
+            }
             _activeTransition = nullptr;
             cleanupOutgoingScene();
         }
@@ -327,16 +350,28 @@ bool SceneManager::shouldBlockInput() const {
 void SceneManager::cleanupOutgoingScene() {
     if (_outgoingScene) {
         _outgoingScene->onExit();
-        if (inputManager) {
-            inputManager->unregisterAllListenersForScene(_outgoingScene);
-            inputManager->clearDeferredActionsForScene(_outgoingScene);
+
+        // FIX: If pushScene was used, the scene remains parked on the stack and must NOT be deleted.
+        bool keepAlive = false;
+        for (int i = 0; i < sceneCount; i++) {
+            if (sceneStack[i] == _outgoingScene) {
+                keepAlive = true;
+                break;
+            }
         }
-        if (_logger) {
-            char buf[128];
-            snprintf(buf, sizeof(buf), "[SCENES] Cleaning up outgoing scene '%s' (%p)", _previousSceneName.c_str(), (void*)_outgoingScene);
-            _logger(buf);
+
+        if (!keepAlive) {
+            if (inputManager) {
+                inputManager->unregisterAllListenersForScene(_outgoingScene);
+                inputManager->clearDeferredActionsForScene(_outgoingScene);
+            }
+            if (_logger) {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "[SCENES] Cleaning up outgoing scene '%s' (%p)", _previousSceneName.c_str(), (void*)_outgoingScene);
+                _logger(buf);
+            }
+            delete _outgoingScene;
         }
-        delete _outgoingScene;
         _outgoingScene = nullptr;
     }
 }
@@ -344,7 +379,9 @@ void SceneManager::cleanupOutgoingScene() {
 void SceneManager::forceCleanupTransition() {
     if (_activeTransition) {
         if (_logger) _logger("[SCENES] Force-cleaning up active transition.");
-        delete _activeTransition;
+        if (_activeTransition->autoDelete) {
+            delete _activeTransition;
+        }
         _activeTransition = nullptr;
     }
     cleanupOutgoingScene();
@@ -357,25 +394,28 @@ Scene* SceneManager::getCurrentScene() const {
     return nullptr;
 }
 
-String SceneManager::getCurrentSceneName() const {
+const char* SceneManager::getCurrentSceneName() const {
     if (sceneCount > 0) {
-        return _sceneNameStack[sceneCount - 1];
+        return _sceneNameStack[sceneCount - 1].c_str();
     }
     return "";
 }
 
-SceneFactoryFunction SceneManager::getFactoryByName(const String& name) const {
-    auto it = _sceneFactories.find(name.c_str());
+SceneFactoryFunction SceneManager::getFactoryByName(const char* name) const {
+    if (!name) return nullptr;
+    auto it = std::find_if(_sceneFactories.begin(), _sceneFactories.end(), [&](const auto& pair) {
+        return pair.first == name;
+    });
     if (it != _sceneFactories.end()) {
         return it->second;
     }
     return nullptr;
 }
 
-std::vector<String> SceneManager::getRegisteredSceneNames() const {
-    std::vector<String> names;
+std::vector<std::string> SceneManager::getRegisteredSceneNames() const {
+    std::vector<std::string> names;
     for (const auto& pair : _sceneFactories) {
-        names.push_back(pair.first.c_str());
+        names.push_back(pair.first);
     }
     return names;
 }
