@@ -1,8 +1,6 @@
 #pragma once
 
 #include <Arduino.h> 
-#include <map>
-#include <string>
 #include <vector>
 #include <functional> 
 #include "Scene.h" 
@@ -22,6 +20,8 @@ using SceneFactoryFunction = std::function<Scene*(void* configData)>;
 
 class SceneManager {
 public:
+    static constexpr size_t MAX_SCENE_NAME_LEN = 32;
+
     SceneManager(); 
     ~SceneManager();
     void processSceneChanges(); 
@@ -45,7 +45,7 @@ public:
     const char* getPreviousSceneName() const;
 
     SceneFactoryFunction getFactoryByName(const char* name) const;
-    std::vector<std::string> getRegisteredSceneNames() const;
+    std::vector<const char*> getRegisteredSceneNames() const;
 
     bool isSceneChangePending() const;
     const char* getPendingSceneName() const;
@@ -60,16 +60,16 @@ public:
 private:
     Scene* sceneStack[MAX_SCENES] = {nullptr};
     int sceneCount = 0;
-    std::string _sceneNameStack[MAX_SCENES]; 
-    std::string _previousSceneName;
+    char _sceneNameStack[MAX_SCENES][MAX_SCENE_NAME_LEN] = {}; 
+    char _previousSceneName[MAX_SCENE_NAME_LEN] = {};
 
     InputManager* inputManager = nullptr;
     EDGELogger _logger;
 
-    // FIX: Replaced node-allocating std::map with contiguous std::vector to prevent heap fragmentation
-    std::vector<std::pair<std::string, SceneFactoryFunction>> _sceneFactories;
+    // Fast vector of static/literal const char* keys
+    std::vector<std::pair<const char*, SceneFactoryFunction>> _sceneFactories;
 
-    std::string _pendingNextSceneName;
+    char _pendingNextSceneName[MAX_SCENE_NAME_LEN] = {};
     void* _pendingConfigData = nullptr;
     bool _pendingReplaceStack = true;
     bool _pendingSceneChange = false;

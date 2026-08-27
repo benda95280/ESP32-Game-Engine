@@ -1,0 +1,392 @@
+diff --git a/src/Renderer.cpp b/src/Renderer.cpp
+deleted file mode 100644
+index f794d1c..0000000
+--- a/src/Renderer.cpp
++++ /dev/null
+@@ -1,111 +0,0 @@
+-#include "Renderer.h"
+-#include <stdarg.h>  // Required for variadic functions
+-#include <U8g2lib.h>
+-#include <SerialForwarder.h>
+-
+-extern SerialForwarder* forwardedSerial_ptr; // Use pointer type
+-
+-
+-// Constructor implementation updated
+-Renderer::Renderer(U8G2* u8g2_ptr, const DisplayConfig& displayConf)
+-    : u8g2(u8g2_ptr), config(displayConf), width(displayConf.width), height(displayConf.height)
+-{
+-    // Ensure u8g2 pointer is not null
+-    if (!u8g2) {
+-        if (_logger) _logger("[RENDERER] Renderer Error: U8G2 pointer is null!");
+-    }
+-     // Calculate offsets based on config if they weren't provided or are default
+-     xOffset = displayConf.xOffset;
+-     yOffset = displayConf.yOffset;
+-}
+-
+-
+-void Renderer::init() {
+-    if (!u8g2) return; // Don't proceed if u8g2 is null
+-    //u8g2->setBusClock(400000);
+-    u8g2->setBusClock(1000000); // Increased bus clock
+-
+-    u8g2->begin();
+-    u8g2->setContrast(255); // Max contrast
+-    u8g2->setFont(u8g2_font_5x7_tf); // Default font
+-    if (_logger) _logger("[RENDERER] Renderer initialized.");
+-}
+-
+-void Renderer::beginFrame() {
+-     if (!u8g2) return;
+-    u8g2->clearBuffer();
+-}
+-
+-void Renderer::endFrame() {
+-     if (!u8g2) return;
+-    u8g2->sendBuffer();
+-}
+-
+-void Renderer::drawText(int x, int y, const char* str) {
+-     if (!u8g2) return;
+-    u8g2->drawStr(xOffset + x, yOffset + y, str);
+-}
+-
+-void Renderer::drawTextSafe(int x, int y, const char* format, ...) {
+-     if (!u8g2) return;
+-    
+-    char buffer[32];  // Temporary buffer for formatting
+-    va_list args;
+-    va_start(args, format);
+-    vsnprintf(buffer, sizeof(buffer), format, args);  // Format text safely
+-    va_end(args);
+-
+-    // The createSafeString() and displayText object were redundant and have been removed.
+-    // We now use the standard C buffer directly, which is already handled safely by vsnprintf.
+-    u8g2->drawStr(xOffset + x, yOffset + y, buffer);
+-}
+-
+-void Renderer::drawCircle(int x, int y, int radius) {
+-     if (!u8g2) return;
+-    // Use drawCircle for outline, drawDisc for filled
+-    u8g2->drawCircle(xOffset + x, yOffset + y, radius);
+-}
+-
+-void Renderer::drawFilledCircle(int x, int y, int radius) {
+-    if (!u8g2) return;
+-   // Use drawCircle for outline, drawDisc for filled
+-   u8g2->drawDisc(xOffset + x, yOffset + y, radius);
+-}
+-
+-void Renderer::drawRectangle(int x, int y, int width, int height) {
+-     if (!u8g2) return;
+-    u8g2->drawFrame(xOffset + x, yOffset + y, width, height);
+-}
+-
+-void Renderer::drawFilledRectangle(int x, int y, int width, int height) {
+-     if (!u8g2) return;
+-    u8g2->drawBox(xOffset + x, yOffset + y, width, height);
+-}
+-
+-void Renderer::drawLine(int x1, int y1, int x2, int y2) {
+-     if (!u8g2) return;
+-    u8g2->drawLine(xOffset + x1, yOffset + y1, xOffset + x2, yOffset + y2);
+-}
+-
+-void Renderer::setFont(const uint8_t* font) {
+-     if (!u8g2) return;
+-    u8g2->setFont(font);
+-}
+-
+-// Keep setFontSize or remove if you prefer only setFont
+-void Renderer::setFontSize(int size) {
+-     if (!u8g2) return;
+-    if (size == 1) {
+-        u8g2->setFont(u8g2_font_5x7_tf);
+-    } else if (size == 2) {
+-        u8g2->setFont(u8g2_font_ncenB08_tr);
+-    } else {
+-        // Consider a larger default or specific font for size > 2
+-        u8g2->setFont(u8g2_font_ncenB14_tr);
+-    }
+-}
+-
+-void Renderer::setContrast(uint8_t level) {
+-     if (!u8g2) return;
+-     u8g2->setContrast(level);
+-}
+\ No newline at end of file
+diff --git a/src/SceneManager.cpp b/src/SceneManager.cpp
+index 562a05c..c075b21 100644
+--- a/src/SceneManager.cpp
++++ b/src/SceneManager.cpp
+@@ -26,10 +26,10 @@ void SceneManager::setLogger(EDGELogger logger) {
+ 
+ // --- NEW GETTER IMPLEMENTATIONS ---
+ bool SceneManager::isSceneChangePending() const { return _pendingSceneChange; }
+-const char* SceneManager::getPendingSceneName() const { return _pendingNextSceneName.c_str(); }
++const char* SceneManager::getPendingSceneName() const { return _pendingNextSceneName; }
+ void* SceneManager::getPendingConfigData() const { return _pendingConfigData; }
+ bool SceneManager::getPendingReplaceStack() const { return _pendingReplaceStack; }
+-const char* SceneManager::getPreviousSceneName() const { return _previousSceneName.c_str(); }
++const char* SceneManager::getPreviousSceneName() const { return _previousSceneName; }
+ // --- END NEW GETTER IMPLEMENTATIONS ---
+ 
+ void SceneManager::processSceneChanges() {
+@@ -37,19 +37,22 @@ void SceneManager::processSceneChanges() {
+         return;
+     }
+ 
+-    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Processing scene change request. Target: %s, Replace: %s", _pendingNextSceneName.c_str(), _pendingReplaceStack ? "true" : "false"); _logger(buf); }
++    if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Processing scene change request. Target: %s, Replace: %s", _pendingNextSceneName, _pendingReplaceStack ? "true" : "false"); _logger(buf); }
++
++    char nameToSet[MAX_SCENE_NAME_LEN];
++    strncpy(nameToSet, _pendingNextSceneName, sizeof(nameToSet) - 1);
++    nameToSet[sizeof(nameToSet) - 1] = '\0';
+ 
+-    std::string nameToSet = _pendingNextSceneName;
+     bool replace = _pendingReplaceStack;
+     void* configPtr = _pendingConfigData;
+     SceneTransition* transition = _pendingTransition;
+ 
+-    if (!nameToSet.empty() && nameToSet != "UNKNOWN") {
++    if (nameToSet[0] != '\0' && strcmp(nameToSet, "UNKNOWN") != 0) {
+         bool success = false;
+         if (replace) {
+-            success = setCurrentScene(nameToSet.c_str(), configPtr, transition);
++            success = setCurrentScene(nameToSet, configPtr, transition);
+         } else {
+-            success = pushScene(nameToSet.c_str(), configPtr, transition);
++            success = pushScene(nameToSet, configPtr, transition);
+         }
+         
+         if (success) {
+@@ -78,7 +81,7 @@ bool SceneManager::registerScene(const char* name, SceneFactoryFunction factory)
+     }
+ 
+     auto it = std::find_if(_sceneFactories.begin(), _sceneFactories.end(), [&](const auto& pair) {
+-        return pair.first == name;
++        return strcmp(pair.first, name) == 0;
+     });
+ 
+     if (it != _sceneFactories.end()) {
+@@ -100,7 +103,8 @@ void SceneManager::requestSetCurrentScene(const char* sceneName, void* configDat
+             delete _pendingTransition;
+         }
+     }
+-    _pendingNextSceneName = sceneName ? sceneName : "";
++    strncpy(_pendingNextSceneName, sceneName ? sceneName : "", sizeof(_pendingNextSceneName) - 1);
++    _pendingNextSceneName[sizeof(_pendingNextSceneName) - 1] = '\0';
+     _pendingConfigData = configData;
+     _pendingTransition = transition;
+     _pendingReplaceStack = true;
+@@ -115,7 +119,8 @@ void SceneManager::requestPushScene(const char* sceneName, void* configData, Sce
+             delete _pendingTransition;
+         }
+     }
+-    _pendingNextSceneName = sceneName ? sceneName : "";
++    strncpy(_pendingNextSceneName, sceneName ? sceneName : "", sizeof(_pendingNextSceneName) - 1);
++    _pendingNextSceneName[sizeof(_pendingNextSceneName) - 1] = '\0';
+     _pendingConfigData = configData;
+     _pendingTransition = transition;
+     _pendingReplaceStack = false;
+@@ -124,7 +129,7 @@ void SceneManager::requestPushScene(const char* sceneName, void* configData, Sce
+ 
+ void SceneManager::clearPendingSceneChange() {
+     _pendingSceneChange = false;
+-    _pendingNextSceneName = "";
++    _pendingNextSceneName[0] = '\0';
+     _pendingConfigData = nullptr;
+     if (_pendingTransition) {
+         if (_pendingTransition->autoDelete) {
+@@ -142,10 +147,10 @@ void SceneManager::clearStack() {
+                 inputManager->unregisterAllListenersForScene(sceneStack[i]);
+                 inputManager->clearDeferredActionsForScene(sceneStack[i]);
+             }
+-            if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Deleting scene '%s' (%p) from stack index %d", _sceneNameStack[i].c_str(), sceneStack[i], i); _logger(buf); }
++            if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Deleting scene '%s' (%p) from stack index %d", _sceneNameStack[i], sceneStack[i], i); _logger(buf); }
+             delete sceneStack[i];
+             sceneStack[i] = nullptr;
+-            _sceneNameStack[i] = "";
++            _sceneNameStack[i][0] = '\0';
+         }
+     }
+     sceneCount = 0;
+@@ -157,7 +162,7 @@ Scene* SceneManager::createSceneByName(const char* sceneName, void* configData)
+     if (!sceneName) return nullptr;
+ 
+     auto it = std::find_if(_sceneFactories.begin(), _sceneFactories.end(), [&](const auto& pair) {
+-        return pair.first == sceneName;
++        return strcmp(pair.first, sceneName) == 0;
+     });
+ 
+     if (it == _sceneFactories.end()) {
+@@ -183,7 +188,8 @@ Scene* SceneManager::setupNewScene(const char* sceneName, void* configData) {
+     Scene* newScene = createSceneByName(sceneName, configData);
+     if (!newScene) return nullptr;
+     sceneStack[sceneCount] = newScene;
+-    _sceneNameStack[sceneCount] = sceneName ? sceneName : "";
++    strncpy(_sceneNameStack[sceneCount], sceneName ? sceneName : "", sizeof(_sceneNameStack[sceneCount]) - 1);
++    _sceneNameStack[sceneCount][sizeof(_sceneNameStack[sceneCount]) - 1] = '\0';
+     sceneCount++;
+     newScene->onEnter();
+     return newScene;
+@@ -200,13 +206,14 @@ bool SceneManager::setCurrentScene(const char* sceneName, void* configData, Scen
+     forceCleanupTransition();
+ 
+     if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
+-        _previousSceneName = _sceneNameStack[sceneCount - 1];
++        strncpy(_previousSceneName, _sceneNameStack[sceneCount - 1], sizeof(_previousSceneName) - 1);
++        _previousSceneName[sizeof(_previousSceneName) - 1] = '\0';
+         _outgoingScene = sceneStack[sceneCount - 1];
+         sceneStack[sceneCount - 1] = nullptr;
+-        _sceneNameStack[sceneCount - 1] = "";
++        _sceneNameStack[sceneCount - 1][0] = '\0';
+         sceneCount--;
+     } else {
+-        _previousSceneName = "";
++        _previousSceneName[0] = '\0';
+         _outgoingScene = nullptr;
+     }
+ 
+@@ -244,11 +251,12 @@ bool SceneManager::pushScene(const char* sceneName, void* configData, SceneTrans
+     forceCleanupTransition();
+ 
+     if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
+-        _previousSceneName = _sceneNameStack[sceneCount - 1];
++        strncpy(_previousSceneName, _sceneNameStack[sceneCount - 1], sizeof(_previousSceneName) - 1);
++        _previousSceneName[sizeof(_previousSceneName) - 1] = '\0';
+         _outgoingScene = sceneStack[sceneCount - 1];
+         // Do NOT remove the outgoing scene from the stack or decrement sceneCount!
+     } else {
+-        _previousSceneName = "";
++        _previousSceneName[0] = '\0';
+         _outgoingScene = nullptr;
+     }
+ 
+@@ -285,18 +293,21 @@ bool SceneManager::popScene() {
+ 
+     if (sceneCount > 0) {
+         Scene* removedScene = sceneStack[sceneCount - 1];
+-        std::string removedSceneName = _sceneNameStack[sceneCount - 1];
+-        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Popping scene '%s'", removedSceneName.c_str()); _logger(buf); }
++        char removedSceneName[MAX_SCENE_NAME_LEN];
++        strncpy(removedSceneName, _sceneNameStack[sceneCount - 1], sizeof(removedSceneName) - 1);
++        removedSceneName[sizeof(removedSceneName) - 1] = '\0';
++        if (_logger) { char buf[128]; snprintf(buf, sizeof(buf), "[SCENES] Popping scene '%s'", removedSceneName); _logger(buf); }
+ 
+         if (removedScene) {
+-            _previousSceneName = removedSceneName;
++            strncpy(_previousSceneName, removedSceneName, sizeof(_previousSceneName) - 1);
++            _previousSceneName[sizeof(_previousSceneName) - 1] = '\0';
+             removedScene->onExit();
+             inputManager->unregisterAllListenersForScene(removedScene);
+             inputManager->clearDeferredActionsForScene(removedScene);
+             delete removedScene;
+         }
+         sceneStack[sceneCount - 1] = nullptr;
+-        _sceneNameStack[sceneCount -1] = "";
++        _sceneNameStack[sceneCount - 1][0] = '\0';
+         sceneCount--;
+ 
+         if (sceneCount > 0 && sceneStack[sceneCount - 1]) {
+@@ -305,7 +316,7 @@ bool SceneManager::popScene() {
+         return true;
+     } else { 
+         if (_logger) _logger("[SCENES] Attempted to pop from an empty scene stack.");
+-        _previousSceneName = "";
++        _previousSceneName[0] = '\0';
+         return false; 
+     }
+ }
+@@ -367,7 +378,7 @@ void SceneManager::cleanupOutgoingScene() {
+             }
+             if (_logger) {
+                 char buf[128];
+-                snprintf(buf, sizeof(buf), "[SCENES] Cleaning up outgoing scene '%s' (%p)", _previousSceneName.c_str(), (void*)_outgoingScene);
++                snprintf(buf, sizeof(buf), "[SCENES] Cleaning up outgoing scene '%s' (%p)", _previousSceneName, (void*)_outgoingScene);
+                 _logger(buf);
+             }
+             delete _outgoingScene;
+@@ -396,7 +407,7 @@ Scene* SceneManager::getCurrentScene() const {
+ 
+ const char* SceneManager::getCurrentSceneName() const {
+     if (sceneCount > 0) {
+-        return _sceneNameStack[sceneCount - 1].c_str();
++        return _sceneNameStack[sceneCount - 1];
+     }
+     return "";
+ }
+@@ -404,7 +415,7 @@ const char* SceneManager::getCurrentSceneName() const {
+ SceneFactoryFunction SceneManager::getFactoryByName(const char* name) const {
+     if (!name) return nullptr;
+     auto it = std::find_if(_sceneFactories.begin(), _sceneFactories.end(), [&](const auto& pair) {
+-        return pair.first == name;
++        return strcmp(pair.first, name) == 0;
+     });
+     if (it != _sceneFactories.end()) {
+         return it->second;
+@@ -412,8 +423,8 @@ SceneFactoryFunction SceneManager::getFactoryByName(const char* name) const {
+     return nullptr;
+ }
+ 
+-std::vector<std::string> SceneManager::getRegisteredSceneNames() const {
+-    std::vector<std::string> names;
++std::vector<const char*> SceneManager::getRegisteredSceneNames() const {
++    std::vector<const char*> names;
+     for (const auto& pair : _sceneFactories) {
+         names.push_back(pair.first);
+     }
+diff --git a/src/SceneManager.h b/src/SceneManager.h
+index a9389f3..9b0f573 100644
+--- a/src/SceneManager.h
++++ b/src/SceneManager.h
+@@ -1,8 +1,6 @@
+ #pragma once
+ 
+ #include <Arduino.h> 
+-#include <map>
+-#include <string>
+ #include <vector>
+ #include <functional> 
+ #include "Scene.h" 
+@@ -22,6 +20,8 @@ using SceneFactoryFunction = std::function<Scene*(void* configData)>;
+ 
+ class SceneManager {
+ public:
++    static constexpr size_t MAX_SCENE_NAME_LEN = 32;
++
+     SceneManager(); 
+     ~SceneManager();
+     void processSceneChanges(); 
+@@ -45,7 +45,7 @@ public:
+     const char* getPreviousSceneName() const;
+ 
+     SceneFactoryFunction getFactoryByName(const char* name) const;
+-    std::vector<std::string> getRegisteredSceneNames() const;
++    std::vector<const char*> getRegisteredSceneNames() const;
+ 
+     bool isSceneChangePending() const;
+     const char* getPendingSceneName() const;
+@@ -60,16 +60,16 @@ public:
+ private:
+     Scene* sceneStack[MAX_SCENES] = {nullptr};
+     int sceneCount = 0;
+-    std::string _sceneNameStack[MAX_SCENES]; 
+-    std::string _previousSceneName;
++    char _sceneNameStack[MAX_SCENES][MAX_SCENE_NAME_LEN] = {}; 
++    char _previousSceneName[MAX_SCENE_NAME_LEN] = {};
+ 
+     InputManager* inputManager = nullptr;
+     EDGELogger _logger;
+ 
+-    // FIX: Replaced node-allocating std::map with contiguous std::vector to prevent heap fragmentation
+-    std::vector<std::pair<std::string, SceneFactoryFunction>> _sceneFactories;
++    // Fast vector of static/literal const char* keys
++    std::vector<std::pair<const char*, SceneFactoryFunction>> _sceneFactories;
+ 
+-    std::string _pendingNextSceneName;
++    char _pendingNextSceneName[MAX_SCENE_NAME_LEN] = {};
+     void* _pendingConfigData = nullptr;
+     bool _pendingReplaceStack = true;
+     bool _pendingSceneChange = false;
